@@ -23,6 +23,13 @@ const errorCode = document.getElementById("sj-error-code");
 const debugLog = globalThis.scramjetDebugLog || (() => {});
 debugLog("index.js loaded");
 
+addEventListener("message", (event) => {
+	if (event.origin !== location.origin) return;
+	if (event.data?.scramjetFrameDebug) {
+		debugLog("FRAME", ...(event.data.args || []));
+	}
+});
+
 if (navigator.serviceWorker) {
 	navigator.serviceWorker.addEventListener("message", (event) => {
 		if (event.data?.scramjetDebug) {
