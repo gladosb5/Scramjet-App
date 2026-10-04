@@ -23,6 +23,14 @@ const errorCode = document.getElementById("sj-error-code");
 const debugLog = globalThis.scramjetDebugLog || (() => {});
 debugLog("index.js loaded");
 
+if (navigator.serviceWorker) {
+	navigator.serviceWorker.addEventListener("message", (event) => {
+		if (event.data?.scramjetDebug) {
+			debugLog("SW", ...(event.data.args || []));
+		}
+	});
+}
+
 const { ScramjetController } = $scramjetLoadController();
 debugLog("ScramjetController loaded");
 
@@ -35,8 +43,15 @@ const scramjet = new ScramjetController({
 });
 
 debugLog("initializing Scramjet");
-scramjet.init();
-debugLog("Scramjet init requested");
+const scramjetReady = scramjet.init().then(
+	() => {
+		debugLog("Scramjet init complete");
+	},
+	(err) => {
+		debugLog("Scramjet init failed", err);
+		throw err;
+	}
+);
 
 const connection = new BareMux.BareMuxConnection("/baremux/worker.js");
 debugLog("BareMux connection created");
@@ -46,12 +61,20 @@ form.addEventListener("submit", async (event) => {
 	debugLog("form submit", address.value);
 
 	try {
+		debugLog("waiting for Scramjet init");
+		await scramjetReady;
+		debugLog("Scramjet ready");
+
 		debugLog("registering service worker");
-		await registerSW();
-		debugLog("service worker registered");
+		const registration = await registerSW();
+		debugLog(
+			"service worker active",
+			registration.active?.state || "unknown",
+			registration.scope
+		);
 	} catch (err) {
-		debugLog("service worker registration failed", err);
-		error.textContent = "Failed to register service worker.";
+		debugLog("startup failed", err);
+		error.textContent = "Failed to initialize Scramjet.";
 		errorCode.textContent = err.toString();
 		throw err;
 	}
@@ -79,6 +102,19 @@ form.addEventListener("submit", async (event) => {
 
 	const frame = scramjet.createFrame();
 	frame.frame.id = "sj-frame";
+
+	frame.frame.addEventListener("load", () => {
+		let href = "(unavailable)";
+		try {
+			href = frame.frame.contentWindow?.location?.href || href;
+		} catch {}
+		debugLog("proxy frame load", href);
+	});
+
+	frame.frame.addEventListener("error", (event) => {
+		debugLog("proxy frame error", event);
+	});
+
 	document.body.appendChild(frame.frame);
 	debugLog("proxy frame created");
 
