@@ -1,45 +1,22 @@
 "use strict";
-/**
- * @type {HTMLFormElement}
- */
+
 const form = document.getElementById("sj-form");
-/**
- * @type {HTMLInputElement}
- */
 const address = document.getElementById("sj-address");
-/**
- * @type {HTMLInputElement}
- */
 const searchEngine = document.getElementById("sj-search-engine");
-/**
- * @type {HTMLParagraphElement}
- */
-const error = document.getElementById("sj-error");
-/**
- * @type {HTMLPreElement}
- */
-const errorCode = document.getElementById("sj-error-code");
+const loading = document.getElementById("sj-loading");
+const loadingLog = document.getElementById("sj-loading-log");
 
-const debugLog = globalThis.scramjetDebugLog || (() => {});
-debugLog("index.js loaded");
+function status(message) {
+	loading.hidden = false;
+	loadingLog.textContent += "> " + message + "\n";
+	loadingLog.scrollTop = loadingLog.scrollHeight;
+}
 
-addEventListener("message", (event) => {
-	if (event.origin !== location.origin) return;
-	if (event.data?.scramjetFrameDebug) {
-		debugLog("FRAME", ...(event.data.args || []));
-	}
-});
-
-if (navigator.serviceWorker) {
-	navigator.serviceWorker.addEventListener("message", (event) => {
-		if (event.data?.scramjetDebug) {
-			debugLog("SW", ...(event.data.args || []));
-		}
-	});
+function fail(message) {
+	status("error: " + message);
 }
 
 const { ScramjetController } = $scramjetLoadController();
-debugLog("ScramjetController loaded");
 
 const scramjet = new ScramjetController({
 	files: {
@@ -49,82 +26,82 @@ const scramjet = new ScramjetController({
 	},
 });
 
-debugLog("initializing Scramjet");
-const scramjetReady = scramjet.init().then(
-	() => {
-		debugLog("Scramjet init complete");
-	},
-	(err) => {
-		debugLog("Scramjet init failed", err);
-		throw err;
-	}
-);
-
+const scramjetReady = scramjet.init();
 const connection = new BareMux.BareMuxConnection("/baremux/worker.js");
-debugLog("BareMux connection created");
 
 form.addEventListener("submit", async (event) => {
 	event.preventDefault();
-	debugLog("form submit", address.value);
 
-	try {
-		debugLog("waiting for Scramjet init");
-		await scramjetReady;
-		debugLog("Scramjet ready");
+	if (!address.value.trim()) return;
 
-		debugLog("registering service worker");
-		const registration = await registerSW();
-		debugLog(
-			"service worker active",
-			registration.active?.state || "unknown",
-			registration.scope
-		);
-	} catch (err) {
-		debugLog("startup failed", err);
-		error.textContent = "Failed to initialize Scramjet.";
-		errorCode.textContent = err.toString();
-		throw err;
-	}
+	loadingLog.textContent = "";
+	status("input accepted");
+	status("resolving destination");
 
 	const url = search(address.value, searchEngine.value);
-	debugLog("resolved URL", url);
+	status("destination resolved");
+	status("waiting for runtime initialization");
 
-	let wispUrl =
-		(location.protocol === "https:" ? "wss" : "ws") +
-		"://" +
-		location.host +
-		"/wisp/";
-	debugLog("Wisp URL", wispUrl);
+	try {
+		await scramjetReady;
+		status("runtime initialized");
 
-	const transport = await connection.getTransport();
-	debugLog("current transport", transport);
+		status("registering background worker");
+		const registration = await registerSW();
+		status(
+			"background worker ready" +
+				(registration.active?.state ? " (" + registration.active.state + ")" : "")
+		);
 
-	if (transport !== "/libcurl/index.mjs") {
-		debugLog("setting libcurl transport");
-		await connection.setTransport("/libcurl/index.mjs", [
-			{ websocket: wispUrl },
-		]);
-		debugLog("libcurl transport ready");
+		const wispUrl =
+			(location.protocol === "https:" ? "wss" : "ws") +
+			"://" +
+			location.host +
+			"/wisp/";
+
+		status("checking network transport");
+		const transport = await connection.getTransport();
+
+		if (transport !== "/libcurl/index.mjs") {
+			status("configuring network transport");
+			await connection.setTransport("/libcurl/index.mjs", [
+				{ websocket: wispUrl },
+			]);
+			status("network transport ready");
+		} else {
+			status("network transport already ready");
+		}
+
+		status("creating browsing context");
+		const frame = scramjet.createFrame();
+		frame.frame.id = "sj-frame";
+
+		let navigationStarted = false;
+		let finished = false;
+
+		const finish = () => {
+			if (finished || !navigationStarted) return;
+			finished = true;
+			status("document loaded");
+			setTimeout(() => {
+				loading.remove();
+			}, 120);
+		};
+
+		frame.frame.addEventListener("load", finish);
+		frame.frame.addEventListener("error", () => {
+			fail("document failed to load");
+		});
+
+		document.body.appendChild(frame.frame);
+		status("browsing context attached");
+		status("starting navigation");
+
+		navigationStarted = true;
+		frame.go(url);
+		status("request sent");
+		status("waiting for remote document");
+	} catch (err) {
+		fail(err instanceof Error ? err.message : String(err));
 	}
-
-	const frame = scramjet.createFrame();
-	frame.frame.id = "sj-frame";
-
-	frame.frame.addEventListener("load", () => {
-		let href = "(unavailable)";
-		try {
-			href = frame.frame.contentWindow?.location?.href || href;
-		} catch {}
-		debugLog("proxy frame load", href);
-	});
-
-	frame.frame.addEventListener("error", (event) => {
-		debugLog("proxy frame error", event);
-	});
-
-	document.body.appendChild(frame.frame);
-	debugLog("proxy frame created");
-
-	frame.go(url);
-	debugLog("navigating proxy frame", url);
 });
