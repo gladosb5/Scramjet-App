@@ -29,6 +29,33 @@ async function swLog(...args) {
 	}
 }
 
+scramjet.addEventListener("handleResponse", (event) => {
+	if (
+		(event.destination !== "document" && event.destination !== "iframe") ||
+		typeof event.responseBody !== "string"
+	) {
+		return;
+	}
+
+	const contentType = String(event.responseHeaders?.["content-type"] || "");
+	if (!contentType.toLowerCase().includes("text/html")) return;
+
+	const inject =
+		'<script src="/webkit-stream-shim.js"></script>' +
+		'<script src="/frame-debug.js"></script>';
+
+	if (event.responseBody.includes('src="/webkit-stream-shim.js"')) return;
+
+	const head = event.responseBody.match(/<head(?:\s[^>]*)?>/i);
+	if (head) {
+		event.responseBody = event.responseBody.replace(head[0], head[0] + inject);
+	} else {
+		event.responseBody = inject + event.responseBody;
+	}
+
+	void swLog("injected WebKit/frame debug scripts", event.url?.href || "(unknown)");
+});
+
 async function handleRequest(event) {
 	const isNavigation =
 		event.request.mode === "navigate" ||
