@@ -53,8 +53,32 @@ scramjet.addEventListener("handleResponse", (event) => {
 		event.responseBody = inject + event.responseBody;
 	}
 
-	void swLog("injected WebKit/frame debug scripts", event.url?.href || "(unknown)");
+	void swLog(
+		"injected WebKit/frame debug scripts",
+		event.url?.href || "(unknown)"
+	);
 });
+
+// WebKit leaves an iframe on about:blank when a service worker answers its
+// navigation with a 3xx (even Response.redirect()). Hand back a page that
+// navigates itself instead; Chrome/Firefox behave the same either way.
+// ponytail: a 307/308 POST becomes a GET here; fine for normal browsing.
+function clientRedirect(response) {
+	const location = response.headers.get("location");
+	if (response.status < 300 || response.status > 399 || !location) {
+		return response;
+	}
+
+	const headers = new Headers(response.headers);
+	headers.delete("location");
+	headers.delete("content-length");
+	headers.set("content-type", "text/html; charset=utf-8");
+
+	const target = JSON.stringify(location).replace(/</g, "\\u003c");
+	return new Response(`<script>location.replace(${target})</script>`, {
+		headers,
+	});
+}
 
 async function handleRequest(event) {
 	const isNavigation =
@@ -92,10 +116,14 @@ async function handleRequest(event) {
 					"Scramjet response",
 					response.status,
 					response.statusText,
-					response.headers.get("content-type") || "(no content-type)"
+					response.headers.get("content-type") || "(no content-type)",
+					"location=",
+					response.headers.get("location") || "(none)",
+					"type=",
+					response.type
 				);
 			}
-			return response;
+			return isNavigation ? clientRedirect(response) : response;
 		}
 
 		if (isNavigation) await swLog("route bypassed Scramjet");
@@ -120,9 +148,6 @@ self.addEventListener("install", () => {
 
 self.addEventListener("activate", (event) => {
 	event.waitUntil(
-		Promise.all([
-			self.clients.claim(),
-			swLog("service worker activate"),
-		])
+		Promise.all([self.clients.claim(), swLog("service worker activate")])
 	);
 });
