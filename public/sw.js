@@ -114,7 +114,11 @@ self.addEventListener("fetch", (event) => {
 	event.respondWith(handleRequest(event));
 });
 
-self.addEventListener("install", () => {\n\tself.skipWaiting();\n});\n\nself.addEventListener("activate", (event) => {
+self.addEventListener("install", () => {
+	self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
 	event.waitUntil(
 		Promise.all([
 			self.clients.claim(),
