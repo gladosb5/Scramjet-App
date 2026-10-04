@@ -149,12 +149,15 @@
 	function enqueue(target, task) {
 		const previous = queues.get(target) || Promise.resolve();
 		const next = previous.then(task, task);
-		queues.set(
-			target,
-			next.catch((error) => {
+		let tracked;
+		tracked = next
+			.catch((error) => {
 				console.warn("Scramjet WebKit stream fallback failed:", error);
 			})
-		);
+			.finally(() => {
+				if (queues.get(target) === tracked) queues.delete(target);
+			});
+		queues.set(target, tracked);
 	}
 
 	function patchPostMessage(prototype) {
@@ -170,6 +173,9 @@
 			const hasPending = queues.has(this);
 
 			if (!transferHasStream && !messageHasStream && !hasPending) {
+				if (arguments.length < 2) {
+					return nativePostMessage.call(this, message);
+				}
 				return nativePostMessage.call(this, message, transferOrOptions);
 			}
 
@@ -203,7 +209,23 @@
 		Object.defineProperty(patchedPostMessage, "__scramjetWebKitPatched", {
 			value: true,
 		});
-		prototype.postMessage = patchedPostMessage;
+
+		try {
+			const descriptor = Object.getOwnPropertyDescriptor(
+				prototype,
+				"postMessage"
+			);
+			Object.defineProperty(prototype, "postMessage", {
+				...descriptor,
+				value: patchedPostMessage,
+			});
+		} catch {
+			try {
+				prototype.postMessage = patchedPostMessage;
+			} catch {
+				// Some browser-owned prototypes may be non-writable. Skip those.
+			}
+		}
 	}
 
 	patchPostMessage(MessagePort.prototype);
