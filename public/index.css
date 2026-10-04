@@ -34,6 +34,26 @@ body {
 	background-color: #111;
 }
 
+#sj-debug-log {
+	position: fixed;
+	z-index: 2147483647;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	box-sizing: border-box;
+	max-height: 32vh;
+	margin: 0;
+	padding: 8px 10px;
+	overflow: auto;
+	background: rgba(0, 0, 0, 0.9);
+	color: #00ff66;
+	border-top: 1px solid #00ff66;
+	font: 12px/1.35 "Courier New", Courier, monospace;
+	white-space: pre-wrap;
+	word-break: break-word;
+	pointer-events: none;
+}
+
 #sj-error {
 	color: #ff6666 !important;
 	white-space: pre-wrap;
